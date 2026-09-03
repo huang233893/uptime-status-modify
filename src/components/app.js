@@ -1,8 +1,7 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Header from './header';
 import SiteCards from './uptimerobot';
 import { GetMonitors } from '../common/uptimerobot';
-import dayjs from 'dayjs';
 
 // ===== 缓存策略 =====
 // v2: 修复 dayjs 序列化后 .format() 丢失导致白屏
@@ -118,12 +117,7 @@ function formatError(err) {
 }
 
 function App() {
-  const apikeys = useMemo(() => {
-    const { ApiKeys } = window.Config;
-    if (Array.isArray(ApiKeys)) return ApiKeys;
-    if (typeof ApiKeys === 'string') return [ApiKeys];
-    return [];
-  }, []);
+  const { CountDays } = window.Config;
 
   const [monitors, setMonitors] = useState(null);
   const [error, setError] = useState(null);
@@ -141,14 +135,11 @@ function App() {
       }
     }
 
-    // 2. 没缓存 / 强制刷新 → 请求 API
+    // 2. 没缓存 / 强制刷新 → 请求代理 API（代理端有服务端缓存）
     setLoading(true);
     setError(null);
     try {
-      const { CountDays } = window.Config;
-      const results = await Promise.allSettled(
-        apikeys.map((key) => GetMonitors(key, CountDays))
-      );
+      const results = await Promise.allSettled([GetMonitors(CountDays)]);
 
       const successful = [];
       let firstError = null;
@@ -179,7 +170,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [apikeys]);
+  }, []);
 
   useEffect(() => {
     fetchAll();

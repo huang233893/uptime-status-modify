@@ -2,14 +2,16 @@ import axios from 'axios';
 import dayjs from 'dayjs';
 import { formatNumber } from './helper';
 
-// ===== UptimeRobot FREE 限流保护 =====
-// FREE plan: 10 requests / minute (每 6 秒 1 次)
-// 做两件事：
-//   1. 发送之间强制间隔 620ms（多 key 串行时不触发 10/min 限制）
-//   2. 遇到 429 / stat != ok 带 rate limit 语义 → 指数退避 + 自动重试
-const MIN_REQUEST_INTERVAL = 620;   // ms，两次请求之间的最小间隔
-const MAX_RETRIES = 2;              // 最多自动重试几次
-const BASE_BACKOFF = 4000;          // 指数退避起始：第 1 次等 4s，第 2 次等 8s
+// ===== UptimeRobot API 代理调用 =====
+// 通过 Vercel Edge Function 代理 → /api/uptimerobot
+// 代理端做了服务端缓存（5 分钟），所有用户共享一份缓存，彻底解决多用户触发限流问题
+// 前端仍保留节流和重试逻辑作为第二道防线
+
+const API_PROXY_URL = '/api/uptimerobot';
+
+// 节流：两次请求之间至少间隔（针对同页面内多次刷新）
+const MIN_REQUEST_INTERVAL = 300;
+const MAX_RETRIES = 2;
 
 let lastRequestAt = 0;
 
@@ -17,8 +19,22 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// 从错误消息里解析 retry in X seconds，算出该等多久
+function parseRetryAfter(err) {
+  const msg = (err.message || '') + ' ' + (err.upError?.message || '');
+  const match = msg.match(/retry in (\d+)\s*seconds/);
+  if (match) return parseInt(match[1], 10) * 1000;
+  // 退而求其次：HTTP Retry-After 头
+  const retryAfter = err.response?.headers?.['retry-after'];
+  if (retryAfter) {
+    const sec = parseInt(retryAfter, 10);
+    if (!isNaN(sec)) return sec * 1000;
+  }
+  return 0;
+}
+
 async function throttledRequest(config) {
-  // 节流：保证两次请求至少 MIN_REQUEST_INTERVAL
+  // 节流
   const now = Date.now();
   const waitMs = MIN_REQUEST_INTERVAL - (now - lastRequestAt);
   if (waitMs > 0) {
@@ -32,14 +48,22 @@ async function throttledRequest(config) {
       return await axios(config);
     } catch (err) {
       const status = err.response?.status;
+      const msg = (err.message || '').toLowerCase();
+      const upMsg = (err.upError?.message || '').toLowerCase();
+
+      // 限流判定：429 + 含 rate limit / too many / exceeded 关键词
+      // 注意：403 不再视为限流（403 更可能是权限/Key 问题，重试没用）
       const isRateLimited =
         status === 429 ||
-        status === 403 ||
-        (err.message || '').toLowerCase().includes('rate limit') ||
-        (err.message || '').toLowerCase().includes('too many');
+        msg.includes('rate limit') ||
+        msg.includes('too many') ||
+        msg.includes('exceeded') ||
+        upMsg.includes('rate_limit_exceeded');
 
       if (isRateLimited && attempt < MAX_RETRIES) {
-        const backoff = BASE_BACKOFF * Math.pow(2, attempt);
+        // 优先用 UptimeRobot 告诉我们的重试时间
+        const serverWait = parseRetryAfter(err);
+        const backoff = serverWait > 0 ? serverWait : 4000 * Math.pow(2, attempt);
         await sleep(backoff);
         attempt++;
         continue;
@@ -49,16 +73,15 @@ async function throttledRequest(config) {
   }
 }
 
-async function singleApiKeyFetch(apikey, postdata) {
+async function fetchFromProxy(postdata) {
   const response = await throttledRequest({
     method: 'post',
-    url: 'https://api.uptimerobot.com/v2/getMonitors',
+    url: API_PROXY_URL,
     data: new URLSearchParams(postdata).toString(),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    timeout: 10000,
+    timeout: 15000,
   });
 
-  // API 返回非 ok → 视为失败（可能是限流、key 无效等）
   if (response.data.stat !== 'ok') {
     const err = new Error(response.data.error?.message || response.data.error || 'API 返回异常');
     err.upError = response.data.error;
@@ -68,7 +91,7 @@ async function singleApiKeyFetch(apikey, postdata) {
   return response.data;
 }
 
-export async function GetMonitors(apikey, days) {
+export async function GetMonitors(days) {
   const dates = [];
   const today = dayjs(new Date().setHours(0, 0, 0, 0));
   for (let d = 0; d < days; d++) {
@@ -80,8 +103,8 @@ export async function GetMonitors(apikey, days) {
   const end = dates[0].add(1, 'day').unix();
   ranges.push(`${start}_${end}`);
 
+  // api_key 由 Vercel Edge Function 代理从服务端环境变量注入，前端不再传递
   const postdata = {
-    api_key: apikey,
     format: 'json',
     logs: 1,
     log_types: '1-2',
@@ -90,7 +113,7 @@ export async function GetMonitors(apikey, days) {
     custom_uptime_ranges: ranges.join('-'),
   };
 
-  const data = await singleApiKeyFetch(apikey, postdata);
+  const data = await fetchFromProxy(postdata);
 
   return data.monitors.map((monitor) => {
     const ranges = monitor.custom_uptime_ranges.split('-');
