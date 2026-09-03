@@ -74,11 +74,13 @@ async function throttledRequest(config) {
 }
 
 async function fetchFromProxy(postdata) {
+  // 用 GET 方法 + query params → Vercel CDN 会根据 Cache-Control 自动做全局缓存
+  const query = new URLSearchParams(postdata).toString();
+  const url = query ? `${API_PROXY_URL}?${query}` : API_PROXY_URL;
+
   const response = await throttledRequest({
-    method: 'post',
-    url: API_PROXY_URL,
-    data: new URLSearchParams(postdata).toString(),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    method: 'get',
+    url,
     timeout: 15000,
   });
 
