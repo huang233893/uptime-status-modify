@@ -1,41 +1,69 @@
 // Vercel Edge Function: UptimeRobot API 代理
-// 核心：用 caches.default 显式缓存（POST 请求不会被 Vercel CDN 自动缓存）
-// 所有用户共享同一份缓存 → 彻底解决多用户触发 UptimeRobot FREE 限流问题
+// 所有用户共享同一份服务端缓存 → 彻底解决多用户触发 UptimeRobot FREE 限流问题
 
 export const config = {
   runtime: 'edge',
 };
 
-const CACHE_TTL_OK = 300;           // 成功响应缓存 5 分钟
-const CACHE_TTL_ERR_SHORT = 60;     // 普通错误缓存 60 秒
-const CACHE_TTL_ERR_LONG = 900;     // 限流错误最长缓存 15 分钟
+const CACHE_TTL_OK = 300;        // 成功缓存 5 分钟
+const CACHE_TTL_ERR_SHORT = 60;  // 错误缓存 60 秒
+
+// 安全地获取 caches.default（Vercel Edge / Cloudflare Worker 缓存 API）
+// 如果运行环境不支持，返回 null，后续逻辑自动降级为"不缓存但正常转发"
+function getCache() {
+  try {
+    if (typeof caches !== 'undefined' && caches.default) {
+      return caches.default;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 export default async function handler(request) {
+  // ========== 全局兜底 try-catch（防止任何未捕获崩溃导致 500）==========
+  try {
+    return await main(request);
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        stat: 'fail',
+        error: {
+          type: 'fatal',
+          message: '[Proxy Internal Error] ' + (err?.message || String(err)),
+        },
+      }),
+      {
+        status: 500,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+        },
+      }
+    );
+  }
+}
+
+async function main(request) {
   const origin = request.headers.get('origin') || '*';
 
-  // ========== CORS 预检 ==========
+  // CORS 预检
   if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: corsHeaders(origin),
-      status: 204,
-    });
+    return new Response(null, { headers: corsHeaders(origin), status: 204 });
   }
-
   if (request.method !== 'GET' && request.method !== 'POST') {
     return jsonResponse({ error: 'Method Not Allowed' }, 405, origin);
   }
 
-  // ========== 环境变量校验 ==========
+  // 环境变量
   const apiKey = process.env.UPTIMEROBOT_API_KEY;
   if (!apiKey) {
     return jsonResponse(
-      { stat: 'fail', error: { type: 'config', message: 'Server 未配置 UPTIMEROBOT_API_KEY 环境变量' } },
-      500,
-      origin
+      { stat: 'fail', error: { type: 'config', message: 'Server 未配置 UPTIMEROBOT_API_KEY' } },
+      500, origin
     );
   }
 
-  // ========== 解析请求参数 ==========
+  // 解析请求参数
   const url = new URL(request.url);
   const upstreamData = new URLSearchParams();
   upstreamData.set('api_key', apiKey);
@@ -55,97 +83,84 @@ export default async function handler(request) {
     }
   }
 
-  // ========== 构造缓存 Key ==========
-  // 用虚拟 URL + 参数串做 key，确保不同参数组合各自缓存
-  const paramsString = upstreamData.toString();
-  const cacheKey = new Request('https://uptimerobot-proxy.local/?' + paramsString, { method: 'GET' });
+  // 构造缓存 key（虚拟 URL，method 必须是 GET 才能被 Cache API 匹配）
+  const cacheKey = new Request('https://proxy.local/?' + upstreamData.toString(), { method: 'GET' });
+  const cache = getCache();
 
-  // ========== 查缓存 ==========
-  const cache = caches.default;
-  let cachedResponse = null;
-
-  try {
-    cachedResponse = await cache.match(cacheKey);
-  } catch { /* 缓存不可用时降级 */ }
-
-  if (cachedResponse) {
-    // 命中！加上 HIT 标记
-    const headers = new Headers(cachedResponse.headers);
-    headers.set('X-Proxy-Cache', 'HIT');
-    headers.set('Access-Control-Allow-Origin', origin === '*' ? '*' : origin);
-    return new Response(cachedResponse.body, { status: cachedResponse.status, headers });
+  // 查缓存
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) {
+        const headers = new Headers(hit.headers);
+        headers.set('X-Proxy-Cache', 'HIT');
+        headers.set('Access-Control-Allow-Origin', origin === '*' ? '*' : origin);
+        return new Response(hit.body, { status: hit.status, headers });
+      }
+    } catch { /* 缓存查失败 → 当作没命中 */ }
   }
 
-  // ========== 缓存未命中 → 请求 UptimeRobot ==========
-  let upstreamResponse;
+  // 请求 UptimeRobot
+  let upstreamText = '';
+  let upstreamStatus = 200;
+  let urBody;
+
   try {
-    upstreamResponse = await fetch('https://api.uptimerobot.com/v2/getMonitors', {
+    const resp = await fetch('https://api.uptimerobot.com/v2/getMonitors', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: upstreamData.toString(),
     });
+    upstreamStatus = resp.status;
+    upstreamText = await resp.text();
   } catch (fetchErr) {
     return jsonResponse(
-      { stat: 'fail', error: { type: 'network', message: '无法连接 UptimeRobot API' } },
-      502,
-      origin
+      { stat: 'fail', error: { type: 'network', message: '无法连接 UptimeRobot API: ' + (fetchErr?.message || '') } },
+      502, origin
     );
   }
 
-  const text = await upstreamResponse.text();
-
-  // ========== 解析响应，决定缓存时长 ==========
-  let cacheTtl = CACHE_TTL_OK;
-  let urBody;
-
+  // 解析
   try {
-    urBody = JSON.parse(text);
+    urBody = JSON.parse(upstreamText);
   } catch {
-    // 非 JSON —— 不缓存，直接透传
-    return new Response(text, {
-      status: upstreamResponse.status,
+    // 非 JSON → 直接透传不缓存
+    return new Response(upstreamText, {
+      status: upstreamStatus,
       headers: {
         ...corsHeaders(origin),
-        'Content-Type': upstreamResponse.headers.get('content-type') || 'text/plain',
+        'Content-Type': 'text/plain',
         'Cache-Control': 'no-store',
         'X-Proxy-Cache': 'MISS',
       },
     });
   }
 
-  if (urBody.stat === 'ok') {
-    cacheTtl = CACHE_TTL_OK;
-  } else if (urBody.error?.type === 'rate_limit_exceeded') {
-    // 限流 —— 用 UptimeRobot 说的重试时间
-    const match = (urBody.error.message || '').match(/retry in (\d+)\s*seconds/);
-    if (match) {
-      const retrySec = parseInt(match[1], 10);
-      cacheTtl = Math.min(retrySec + 30, CACHE_TTL_ERR_LONG);
-    } else {
-      cacheTtl = CACHE_TTL_ERR_SHORT;
-    }
-  } else {
+  // 决定缓存时长
+  let cacheTtl = CACHE_TTL_OK;
+  if (urBody.stat !== 'ok') {
     cacheTtl = CACHE_TTL_ERR_SHORT;
   }
 
-  // ========== 构造最终响应（用于返回 + 存缓存）==========
-  const response = new Response(text, {
-    status: upstreamResponse.status === 200 ? 200 : upstreamResponse.status,
+  // 构造响应
+  const response = new Response(upstreamText, {
+    status: upstreamStatus === 200 ? 200 : upstreamStatus,
     headers: {
+      ...corsHeaders(origin),
       'Content-Type': 'application/json',
       'Cache-Control': `s-maxage=${cacheTtl}`,
       'X-Proxy-Cache': 'MISS',
       'X-Proxy-Cache-TTL': String(cacheTtl),
       'X-UR-Stat': urBody.stat || 'unknown',
-      ...corsHeaders(origin),
     },
   });
 
-  // ========== 存入 Edge Cache ==========
-  try {
-    // 克隆一份存缓存（因为 Response body 是流式的，不能读两次）
-    await cache.put(cacheKey, response.clone());
-  } catch { /* 缓存存失败不影响返回 */ }
+  // 存缓存（如果可用）
+  if (cache) {
+    try {
+      await cache.put(cacheKey, response.clone());
+    } catch { /* 存失败不影响返回 */ }
+  }
 
   return response;
 }
