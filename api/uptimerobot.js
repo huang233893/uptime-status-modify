@@ -3,6 +3,7 @@
 
 export const config = {
   runtime: 'edge',
+  regions: ['iad1'],  // 锁定美东 region，确保 caches.default 跨所有请求共享
 };
 
 const CACHE_TTL_OK = 300;        // 成功缓存 5 分钟
