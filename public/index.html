@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <link rel="shortcut icon" href="./favicon.ico" type="image/x-icon" />
+    <!-- 反 FOUC：防止 HTML 先于 CSS 渲染出无样式裸内容 -->
+    <style>
+      html { visibility: hidden; }
+      html.loaded { visibility: visible; }
+    </style>
+    <!-- Material Symbols Outlined -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" />
+    <title>酥米的网页检测小站</title>
+    <script src="./config.js"></script>
+    <script
+      src="https://app.rybbit.io/api/script.js"
+      data-site-id="801"
+      defer
+    ></script>
+  </head>
+  <body>
+    <!-- 主内容容器 -->
+    <div id="app"></div>
+
+    <!-- 底部统计区（直接嵌入 HTML，确保唯一） -->
+    <footer id="footer">
+      <div class="footer-content">
+        <div class="footer-row">
+          <div class="api-info">
+            <span class="material-symbols-outlined">monitor_heart</span>
+            <span>基于 <strong>UptimeRobot</strong> 接口制作 · 检测频率 5 分钟</span>
+          </div>
+          <div class="footer-meta">
+            <span>© 2020-2026</span>
+            <a href="https://up.sumi233.top">By Supermini233</a>
+            <span class="footer-version">v3.0.0</span>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat-item">
+            <span class="stat-label">本文总阅读量</span>
+            <span class="stat-value" id="busuanzi_page_pv">0</span>
+            <span class="stat-unit">次</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">本文总访客量</span>
+            <span class="stat-value stat-green" id="busuanzi_page_uv">0</span>
+            <span class="stat-unit">人</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">本站总访问量</span>
+            <span class="stat-value stat-purple" id="busuanzi_site_pv">0</span>
+            <span class="stat-unit">次</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-label">本站总访客数</span>
+            <span class="stat-value stat-pink" id="busuanzi_site_uv">0</span>
+            <span class="stat-unit">人</span>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
+          <span>本站所有数据仅供参考</span>
+          <span class="footer-divider">·</span>
+          <a href="https://github.com/huang233893/uptime-status-modify/blob/master/README.md">关于本站</a>
+        </div>
+      </div>
+    </footer>
+
+    <!-- 不蒜子访问量统计脚本 -->
+    <script defer src="https://busuanzi.9420.ltd/js"></script>
+  </body>
+</html>
