@@ -125,10 +125,10 @@ function App() {
     const cacheExpired = hasCache && (Date.now() - cached.ts > CACHE_TTL);
 
     if (force) {
-      // 强制刷新：清空缓存判断
+      // 强制刷新：清空缓存判断，请求时加 _t= 绕过 CDN 缓存
       setLoading(true);
       setError(null);
-      await doFetch(CountDays);
+      await doFetch(CountDays, { force: true });
       return;
     }
 
@@ -159,9 +159,9 @@ function App() {
   /**
    * 实际请求 API 的内部函数
    */
-  async function doFetch(days, { silent = false } = {}) {
+  async function doFetch(days, { silent = false, force = false } = {}) {
     try {
-      const results = await Promise.allSettled([GetMonitors(days)]);
+      const results = await Promise.allSettled([GetMonitors(days, { force })]);
 
       const successful = [];
       let firstError = null;

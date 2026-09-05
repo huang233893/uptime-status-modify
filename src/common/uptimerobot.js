@@ -62,8 +62,11 @@ async function throttledRequest(config) {
   }
 }
 
-async function fetchFromProxy(days) {
-  const url = `${API_PROXY_URL}?days=${days}`;
+async function fetchFromProxy(days, { force = false } = {}) {
+  // force=true 时加 _t=时间戳 绕过 Vercel CDN 缓存
+  const url = force
+    ? `${API_PROXY_URL}?days=${days}&_t=${Date.now()}`
+    : `${API_PROXY_URL}?days=${days}`;
   const response = await throttledRequest({
     method: 'get',
     url,
@@ -84,7 +87,7 @@ async function fetchFromProxy(days) {
  * @param {number} days - 天数
  * @returns {Array} 处理后的监控数据数组
  */
-export async function GetMonitors(days) {
+export async function GetMonitors(days, { force = false } = {}) {
   // 前端仍然需要计算 dates 数组，用于后续解析响应时的 daily 映射
   const dates = [];
   const today = dayjs(new Date().setHours(0, 0, 0, 0));
@@ -92,7 +95,7 @@ export async function GetMonitors(days) {
     dates.push(today.subtract(d, 'day'));
   }
 
-  const data = await fetchFromProxy(days);
+  const data = await fetchFromProxy(days, { force });
 
   return data.monitors.map((monitor) => {
     // UptimeRobot 返回的 custom_uptime_ranges：天数个每日range + 1个总体平均range
