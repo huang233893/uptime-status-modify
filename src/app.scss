@@ -891,9 +891,20 @@ body.dark-mode .nav-popup-wrap {
   border-radius: 8px;
   backdrop-filter: blur(8px);
   z-index: 100;
-  animation: fadeIn 0.3s ease forwards;
+  animation: bannerSlideIn 0.3s ease forwards;
   max-width: 90vw;
   text-align: center;
+}
+
+@keyframes bannerSlideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
 }
 
 .page-error {
