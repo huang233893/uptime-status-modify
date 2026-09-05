@@ -9,7 +9,7 @@ export const config = {
 };
 
 const CACHE_TTL_OK = 300;
-const FETCH_TIMEOUT_MS = 20000;  // 放宽到 20s，配合 Cron 预热
+const FETCH_TIMEOUT_MS = 30000;  // Edge Runtime fetch 到 UptimeRobot 需 10-20s
 
 function buildDateParams(days) {
   const d = parseInt(days, 10) || 90;

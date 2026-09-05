@@ -114,6 +114,14 @@ function App() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // 错误 banner 15 秒后自动消失（全屏错误弹窗不会自动消失）
+  useEffect(() => {
+    if (error && monitors && monitors.length > 0) {
+      const t = setTimeout(() => setError(null), 15000);
+      return () => clearTimeout(t);
+    }
+  }, [error, monitors]);
+
   /**
    * 核心数据获取逻辑 —— stale-while-revalidate 模式
    * 1. 有任何缓存（哪怕过期）→ 立即显示 → 后台静默刷新
