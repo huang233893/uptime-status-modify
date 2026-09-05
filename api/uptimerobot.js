@@ -9,7 +9,7 @@ export const config = {
 };
 
 const CACHE_TTL_OK = 300;
-const FETCH_TIMEOUT_MS = 10000;
+const FETCH_TIMEOUT_MS = 20000;  // 放宽到 20s，配合 Cron 预热
 
 function buildDateParams(days) {
   const d = parseInt(days, 10) || 90;

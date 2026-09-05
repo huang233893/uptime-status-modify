@@ -1,4 +1,10 @@
 {
   "buildCommand": "npm run build",
-  "outputDirectory": "build"
+  "outputDirectory": "build",
+  "crons": [
+    {
+      "path": "/api/uptimerobot?days=90&_cron=1",
+      "schedule": "*/4 * * * *"
+    }
+  ]
 }
