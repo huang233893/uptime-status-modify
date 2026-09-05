@@ -1,5 +1,6 @@
 // Vercel Edge Function: UptimeRobot API 代理
-// 缓存机制：前端发 GET 请求 → Vercel CDN 根据 Cache-Control 头全局缓存（跨所有 region 共享）
+// 缓存机制：前端发 GET ?days=90 → URL 极短 → Vercel CDN + Cloudflare 全局缓存
+// 所有用户在同一天内共享同一份缓存 → 90 天参数每天只生成 1 个缓存 key
 
 export const config = {
   runtime: 'edge',
@@ -7,6 +8,37 @@ export const config = {
 
 const CACHE_TTL_OK = 300;        // 成功缓存 5 分钟
 const CACHE_TTL_ERR_SHORT = 60;  // 错误缓存 60 秒
+
+/**
+ * 根据天数计算 custom_uptime_ranges 和 logs_start_date/end_date
+ * 返回 { ranges: ['start_end', ...], start, end }
+ */
+function buildDateParams(days) {
+  const d = parseInt(days, 10) || 90;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  const ranges = [];
+  for (let i = 0; i < d; i++) {
+    const day = new Date(today.getTime() - i * 86400000);
+    const nextDay = new Date(day.getTime() + 86400000);
+    const start = Math.floor(day.getTime() / 1000);
+    const end = Math.floor(nextDay.getTime() / 1000);
+    ranges.push(`${start}_${end}`);
+  }
+
+  // 总体范围（用于获取 logs）
+  const firstStart = ranges[ranges.length - 1].split('_')[0];
+  const lastEnd = ranges[0].split('_')[1];
+  // 附加一个全部的平均 range
+  ranges.push(`${firstStart}_${lastEnd}`);
+
+  return {
+    ranges: ranges.join('-'),
+    start: firstStart,
+    end: lastEnd,
+  };
+}
 
 export default async function handler(request) {
   try {
@@ -22,12 +54,9 @@ export default async function handler(request) {
 async function main(request) {
   const origin = request.headers.get('origin') || '*';
 
-  // CORS 预检
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders(origin), status: 204 });
   }
-
-  // 支持 GET（推荐，CDN 可缓存）和 POST（降级）
   if (request.method !== 'GET' && request.method !== 'POST') {
     return jsonResponse({ error: 'Method Not Allowed' }, 405, origin);
   }
@@ -37,27 +66,36 @@ async function main(request) {
     return jsonResponse({ stat: 'fail', error: { type: 'config', message: 'Server 未配置 UPTIMEROBOT_API_KEY' } }, 500, origin);
   }
 
-  // 解析请求参数
+  // ========== 1. 解析请求，只保留 days 参数 ==========
   const url = new URL(request.url);
-  const upstreamData = new URLSearchParams();
-  upstreamData.set('api_key', apiKey);
-  upstreamData.set('format', 'json');
+  let days = 90;
 
   if (request.method === 'POST') {
     try {
       const bodyText = await request.text();
       const params = new URLSearchParams(bodyText);
-      for (const [key, value] of params) {
-        if (key !== 'api_key') upstreamData.set(key, value);
-      }
+      days = parseInt(params.get('days'), 10) || 90;
     } catch { /* ignore */ }
   } else {
-    for (const [key, value] of url.searchParams) {
-      if (key !== 'api_key') upstreamData.set(key, value);
-    }
+    days = parseInt(url.searchParams.get('days'), 10) || 90;
   }
 
-  // 请求 UptimeRobot
+  days = Math.max(1, Math.min(days, 180)); // 限制 1-180 天
+
+  // ========== 2. 在服务端计算日期范围 ==========
+  const dateParams = buildDateParams(days);
+
+  // ========== 3. 构造 UptimeRobot 请求 ==========
+  const upstreamData = new URLSearchParams();
+  upstreamData.set('api_key', apiKey);
+  upstreamData.set('format', 'json');
+  upstreamData.set('logs', '1');
+  upstreamData.set('log_types', '1-2');
+  upstreamData.set('logs_start_date', dateParams.start);
+  upstreamData.set('logs_end_date', dateParams.end);
+  upstreamData.set('custom_uptime_ranges', dateParams.ranges);
+
+  // ========== 4. 请求 UptimeRobot ==========
   let upstreamText = '';
   let upstreamStatus = 200;
   let urBody;
@@ -77,7 +115,7 @@ async function main(request) {
     );
   }
 
-  // 解析
+  // ========== 5. 解析并决定缓存时长 ==========
   try {
     urBody = JSON.parse(upstreamText);
   } catch {
@@ -91,7 +129,6 @@ async function main(request) {
     });
   }
 
-  // 决定缓存时长
   const cacheTtl = urBody.stat === 'ok' ? CACHE_TTL_OK : CACHE_TTL_ERR_SHORT;
 
   return new Response(upstreamText, {
@@ -99,9 +136,7 @@ async function main(request) {
     headers: {
       ...corsHeaders(origin),
       'Content-Type': 'application/json',
-      // Vercel CDN 会根据这个头全局缓存 GET 响应
-      // 加上 proxy-revalidate 确保 CDN 缓存过期后重新验证
-      'Cache-Control': `s-maxage=${cacheTtl}, proxy-revalidate`,
+      'Cache-Control': `s-maxage=${cacheTtl}`,
       'X-UR-Stat': urBody.stat || 'unknown',
       'X-Proxy-Cache-TTL': String(cacheTtl),
     },

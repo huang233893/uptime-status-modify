@@ -5,11 +5,10 @@ import { GetMonitors } from '../common/uptimerobot';
 import dayjs from 'dayjs';
 
 // ===== 缓存策略 =====
-// v2: 修复 dayjs 序列化后 .format() 丢失导致白屏
 const CACHE_KEY = 'uptime_monitors_cache_v2';
 const CACHE_TTL = 15 * 60 * 1000; // 15 分钟
+const ERROR_LOG_KEY = 'uptime_error_log';
 
-// 把 dayjs 对象转成纯 JSON 可存（daily[].date → 时间戳秒）
 function serializeMonitors(monitors) {
   return monitors.map((m) => ({
     ...m,
@@ -20,7 +19,6 @@ function serializeMonitors(monitors) {
   }));
 }
 
-// 从 JSON 还原（daily[].date → dayjs 对象）
 function deserializeMonitors(data) {
   return data.map((m) => ({
     ...m,
@@ -31,22 +29,7 @@ function deserializeMonitors(data) {
   }));
 }
 
-// 正常读取：有 TTL 检查，过期视为无缓存
 function readCache() {
-  try {
-    const raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const { data, ts } = JSON.parse(raw);
-    if (!data || !Array.isArray(data)) return null;
-    if (Date.now() - ts > CACHE_TTL) return null;
-    return deserializeMonitors(data);
-  } catch {
-    return null;
-  }
-}
-
-// 兜底读取：不做 TTL 检查，只要有数据就返回（用于 API 失败时）
-function readCacheStale() {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
@@ -67,7 +50,20 @@ function writeCache(data) {
   } catch { /* ignore */ }
 }
 
-// 将原始错误转为用户友好的中文描述
+// 错误日志（存最后 5 条）
+function logError(err) {
+  try {
+    const prev = JSON.parse(localStorage.getItem(ERROR_LOG_KEY) || '[]');
+    prev.unshift({
+      time: new Date().toISOString(),
+      message: err?.message || String(err),
+      upError: err?.upError || null,
+      status: err?.response?.status || null,
+    });
+    localStorage.setItem(ERROR_LOG_KEY, JSON.stringify(prev.slice(0, 5)));
+  } catch { /* ignore */ }
+}
+
 function formatError(err) {
   if (!err) return '未知错误';
   if (typeof err === 'string') return err;
@@ -77,7 +73,6 @@ function formatError(err) {
   const upMsg = (err.upError?.message || '').toLowerCase();
   const status = err.response?.status;
 
-  // ===== 限流类（优先级最高）=====
   if (
     status === 429 ||
     upMsg.includes('rate limit') ||
@@ -90,7 +85,6 @@ function formatError(err) {
     return 'API 调用频率超限（UptimeRobot FREE 计划 10 次/分钟），请稍后重试';
   }
 
-  // axios 网络层错误
   if (code === 'ERR_NETWORK' || msg.includes('network error')) {
     return '网络连接失败，请检查网络后重试';
   }
@@ -98,7 +92,6 @@ function formatError(err) {
     return '请求超时，请稍后重试';
   }
 
-  // HTTP 状态码
   if (status === 401 || status === 403) {
     return 'API Key 无效或权限不足，请检查配置';
   }
@@ -109,11 +102,8 @@ function formatError(err) {
     return `服务端错误 (${status})，请稍后重试`;
   }
 
-  // UptimeRobot API 业务错误
   if (err.upError?.message) return err.upError.message;
   if (err.message) return err.message;
-  if (err.msg) return err.msg;
-
   return '未知错误，请稍后重试';
 }
 
@@ -124,23 +114,54 @@ function App() {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  /**
+   * 核心数据获取逻辑 —— stale-while-revalidate 模式
+   * 1. 有任何缓存（哪怕过期）→ 立即显示 → 后台静默刷新
+   * 2. 完全没缓存 → 显示 loading → 请求 API
+   */
   const fetchAll = useCallback(async ({ force = false } = {}) => {
-    // 1. 非强制刷新 → 尝试读缓存（无感、无 loading）
-    if (!force) {
-      const cached = readCache();
-      if (cached) {
-        setMonitors(cached);
-        setError(null);
-        setLoading(false);
-        return;
-      }
+    const cached = readCache();
+    const hasCache = !!cached;
+    const cacheExpired = hasCache && (Date.now() - cached.ts > CACHE_TTL);
+
+    if (force) {
+      // 强制刷新：清空缓存判断
+      setLoading(true);
+      setError(null);
+      await doFetch(CountDays);
+      return;
     }
 
-    // 2. 没缓存 / 强制刷新 → 请求代理 API（代理端有服务端缓存）
+    if (hasCache) {
+      // 有缓存 → 立即显示（不管是否过期）
+      setMonitors(cached.data);
+      setError(null);
+      setLoading(false);
+
+      // 缓存还新鲜 → 直接返回，不请求 API
+      if (!cacheExpired) return;
+
+      // 缓存过期但有值 → 后台静默刷新（不显示 loading）
+      try {
+        await doFetch(CountDays, { silent: true });
+      } catch {
+        // 静默刷新失败没关系，用户还能看到缓存数据
+      }
+      return;
+    }
+
+    // 完全没缓存 → 正常请求流程
     setLoading(true);
     setError(null);
+    await doFetch(CountDays);
+  }, []);
+
+  /**
+   * 实际请求 API 的内部函数
+   */
+  async function doFetch(days, { silent = false } = {}) {
     try {
-      const results = await Promise.allSettled([GetMonitors(CountDays)]);
+      const results = await Promise.allSettled([GetMonitors(days)]);
 
       const successful = [];
       let firstError = null;
@@ -154,24 +175,37 @@ function App() {
 
       if (successful.length > 0) {
         setMonitors(successful);
-        writeCache(successful); // 成功才写缓存
+        writeCache(successful);
+        if (!silent) {
+          setError(null);
+        }
       } else {
-        // API 失败 → 无条件尝试旧缓存（哪怕过期很久）
-        const old = readCacheStale();
-        if (old) {
-          setMonitors(old.data);
-          const ageMin = Math.round((Date.now() - old.ts) / 60000);
-          setError(formatError(firstError) + `（已显示 ${ageMin} 分钟前的缓存数据）`);
-        } else {
-          setError(formatError(firstError));
+        // API 失败
+        logError(firstError);
+        if (!silent) {
+          const cached = readCache();
+          if (cached) {
+            // 有过期缓存 → 显示缓存 + 轻微错误提示
+            setMonitors(cached.data);
+            const ageMin = Math.round((Date.now() - cached.ts) / 60000);
+            setError(formatError(firstError) + `（已显示 ${ageMin} 分钟前的缓存数据）`);
+          } else {
+            // 完全没缓存 → 显示完整错误
+            setError(formatError(firstError));
+          }
         }
       }
     } catch (e) {
-      setError(formatError(e));
+      logError(e);
+      if (!silent) {
+        setError(formatError(e));
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  }, []);
+  }
 
   useEffect(() => {
     fetchAll();
@@ -182,7 +216,7 @@ function App() {
       <Header onRefresh={() => fetchAll({ force: true })} />
 
       <div className='container'>
-        {/* 加载遮罩 */}
+        {/* 加载遮罩（只在完全没缓存时出现） */}
         {loading && (
           <div className='page-loading'>
             <div className='spinner' />
@@ -190,8 +224,11 @@ function App() {
           </div>
         )}
 
-        {/* 错误遮罩 */}
-        {!loading && error && (
+        {/* 错误遮罩（只在完全没数据时出现） */}
+        {!loading && error && monitors && monitors.length > 0 && (
+          <div className='page-error-banner'>{error}</div>
+        )}
+        {!loading && error && (!monitors || monitors.length === 0) && (
           <div className='page-error'>
             <div className='page-error-icon'>⚠️</div>
             <div className='page-error-title'>数据加载失败</div>
@@ -203,7 +240,7 @@ function App() {
         )}
 
         {/* 成功才渲染卡片网格 */}
-        {!loading && !error && monitors && monitors.length > 0 && (
+        {!loading && monitors && monitors.length > 0 && (
           <div id='uptime'>
             <SiteCards monitors={monitors} />
           </div>
