@@ -1,6 +1,6 @@
 window.Config = {
   // 显示标题
-  SiteName: 'My Uptime Status',
+  SiteName: '酥米网页监测站',
 
   // ==== API Key 配置 ====
   // 在 Vercel 项目 Settings → Environment Variables 中添加：
