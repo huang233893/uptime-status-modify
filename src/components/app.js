@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import Header from './header';
 import SiteCards from './uptimerobot';
 import { GetMonitors } from '../common/uptimerobot';
+import dayjs from 'dayjs';
 
 // ===== 缓存策略 =====
 // v2: 修复 dayjs 序列化后 .format() 丢失导致白屏
