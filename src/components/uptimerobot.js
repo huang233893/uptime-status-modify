@@ -48,9 +48,7 @@ function SiteCards({ monitors }) {
       {/* 底部统计 */}
       <div className='site-summary'>
         <span className='site-uptime'>
-          📊 {site.total.times
-            ? `${CountDays} 天可用率 ${site.average}%`
-            : `${CountDays} 天可用率 ${site.average}%`}
+          📊 {CountDays} 天可用率 {site.average}%
         </span>
         {site.total.times > 0 && (
           <span className='site-down-info'>

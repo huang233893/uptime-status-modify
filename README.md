@@ -1,141 +1,122 @@
-# Uptime-status-modify 3.0
+# Uptime-Status
 
-基于 UptimeRobot API 的在线状态面板，由 geekyouth 大佬的原项目修改而来
+基于 [UptimeRobot](https://uptimerobot.com/) API 的在线状态监控面板 —— 现代化界面、响应式布局、深浅色切换，通过 Vercel Edge Function 代理彻底解决 FREE 计划 10 次/分钟的限流问题。
 
-原项目地址：https://github.com/geekyouth/uptime-status
+## ✨ 特性
 
-<img width="1152" alt="image" src="https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/2.JPG">
+- 🎨 **现代化 UI**：圆角卡片、时间线状态条、流畅动画
+- 📱 **响应式**：桌面端 + 移动端完整适配，浮动菜单 + Portal 弹层
+- 🌓 **深浅色模式**：跟随系统偏好，一键切换
+- ⚡ **Edge 代理**：Vercel Edge Function 缓存 UptimeRobot API，5 分钟共享缓存，多人同时访问只消耗 1 次配额
+- 🔒 **API Key 安全**：Key 仅存于 Vercel 环境变量，前端不暴露
+- ⏱️ **防 FOUC**：CSS/React 渲染完成前隐藏 HTML，避免白屏闪烁
+- 🎯 **智能重试**：429 限流时按 UptimeRobot 返回的 `retry in N seconds` 精确等待
 
-## 手机端截图
-![](https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/1.JPG)
+## 🖼️ 截图
 
-## 页尾截图
-![](https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/3.JPG)
+| 亮色模式 | 深色模式 |
+|---|---|
+| <img width="400" alt="亮色" src="https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/2.JPG"> | <img width="400" alt="深色" src="https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/4.JPG"> |
 
-# 优势
-- 现代化的界面和动画
-- 适应式布局
-- 网格式览图
-- 手机端适配
-- 深亮色模式切换
+## 🚀 快速部署
 
-# 3.0 更新内容
-- 全新现代化的界面和动画
-- 优化时间线显示
-- 导航栏重制
-- 手机端布局优化
-- 底部页脚优化
-- Api缓存优化，减少请求次数
-- Api刷新优化，减少请求时间
-- 修复加载问题，避免页面加载时显示空白屏
+### 1. Fork / Clone
 
-# 深亮色模式展示
-
-![亮色模式](https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/2.JPG)
-
-![深色模式](https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/4.JPG)
-
-
-# 准备
-
-- 您需要先到 [UptimeRobot](https://uptimerobot.com/ "UptimeRobot") 添加站点监控，并在 My Settings 页面获取 API Key，仅推荐使用ReadOnly API（没有安全问题）
-- 推荐使用vercel、netlify进行托管
-
-# 如何部署
-
-- 克隆或者 fork 本仓库
-- 修改 `config.js` 文件：
-   - `SiteName`: 要显示的网站名称
-   - `ApiKeys`: 从 UptimeRobot 获取的 Read-Only API Key
-   - `CountDays`: 要显示的日志天数，建议 60 或 90，显示效果比较好
-   - `ShowLink`: 是否显示站点链接
-   - `Navi`: 导航栏的菜单列表
-- 修改 'Index.html' 文件
-   - 页脚信息
-   - 页脚网站
-- 傻瓜式部署到 vercel 或者 netlify
-
----
-
-# ⚠️ API 限流问题与解决方案（Vercel Edge Function 代理）
-
-## 问题现象
-
-网站频繁显示 **"API 调用频率超限"**（即 `rate_limit_exceeded`）。
-
-## 根本原因
-
-UptimeRobot **FREE 计划**的 API 限制是：**每个 API Key 10 次请求 / 分钟**。
-
-原架构是**浏览器直接调 API** + **localStorage 前端缓存**：
-- 每个访客的浏览器有**独立的缓存**（互不共享）
-- 一旦缓存过期（15 分钟），新访客或刷新都会再次消耗配额
-- 10 个访客 = 配额瞬间打满，之后的人全部看到"数据加载失败"
-
-## 解决方案：Vercel Edge Function 代理
-
-通过在 Vercel 上部署一个 Edge Function，**所有用户共享同一份服务端缓存**：
-
-```
-访客 1 ──┐
-访客 2 ──┤──→ /api/uptimerobot ──→ Edge Cache ──→ UptimeRobot API
-访客 3 ──┘       (Edge Function)    (5分钟共享)     (仅 1 次请求)
+```bash
+git clone https://github.com/your-name/uptime-status.git
+cd uptime-status
 ```
 
-- **5 分钟内**：无论多少访客，UptimeRobot 只收到 **1 次请求**
-- **双重缓存**：服务端 Edge Cache（5 分钟）+ 前端 localStorage（15 分钟）
-- **API Key 安全**：Key 不再暴露在前端代码中，仅存于 Vercel 环境变量
+### 2. 修改配置
 
-## 部署步骤
+编辑 `public/config.js`：
 
-### 第一步：推送代码到 GitHub
+```js
+window.Config = {
+  SiteName: '你的站点名',
+  CountDays: 90,        // 日志天数（建议 60-90）
+  ShowLink: true,       // 是否显示站点链接
+  Navi: [               // 导航栏
+    { text: '主页', url: 'https://your-site.com', icon: 'home' },
+    { text: 'GitHub', url: 'https://github.com/your-name', icon: 'code' },
+  ],
+};
+```
 
-确保以下文件都已提交到仓库：
-- `api/uptimerobot.js` — Edge Function 代理代码
-- `vercel.json` — Vercel 构建配置
+### 3. 部署到 Vercel
 
-### 第二步：在 Vercel 添加环境变量
+项目根目录已有 `vercel.json`（含 Cron 预热缓存），直接 Vercel 导入即可：
 
-1. 打开 Vercel 项目 → **Settings** → **Environment Variables**
-2. 点击 **Add New**：
-   - **Key**: `UPTIMEROBOT_API_KEY`
-   - **Value**: 你的 UptimeRobot Read-Only API Key（例如 `ur3131603-xxxxx`）
-   - **Environment**: 勾选 ✅ Production + ✅ Preview + ✅ Development
-3. 点击 **Save**
+1. **Vercel Dashboard → Import → 选择你的 GitHub 仓库**
+2. **Settings → Environment Variables → Add New**：
+   - Key: `UPTIMEROBOT_API_KEY`
+   - Value: 你的 [UptimeRobot](https://uptimerobot.com/dashboard?#mySettings) **Read-Only API Key**
+3. 保存后 Redeploy
 
-> ⚠️ **注意**：现在 `public/config.js` 里已经不需要 `ApiKeys` 数组了，前端会自动通过代理获取数据。
+> 💡 可选：Vercel Cron 已配置为每 4 分钟自动触发 `/api/uptimerobot?days=90&_cron=1` 预热缓存，确保 CDN 始终有数据。
 
-### 第三步：重新部署
+### 4. 验证
 
-- 如果你用 Vercel Git 集成：push 代码后 Vercel 会自动重新部署
-- 如果需要手动触发：Vercel 项目 → **Deployments** → 点击 **Redeploy** → 勾选 **Use existing Build Cache** 旁边的 ⚙️ 清除缓存（首次强制重建）
+浏览器访问你的 Vercel 域名，打开 DevTools → Network → 看 `/api/uptimerobot` 请求的响应头：
 
-## 验证方法
+- `X-Proxy-Cache: MISS` — 首次请求，实际调了 UptimeRobot
+- `X-Proxy-Source: mem` — 命中 Edge 实例内存缓存
+- `X-Proxy-Source: ur` — 刚从 UptimeRobot 拉到的新数据
 
-部署成功后，打开浏览器 DevTools（F12）→ **Network**，刷新页面，找到 `/api/uptimerobot` 请求，观察响应头：
+## 🏗️ 架构
 
-| 响应头 | 含义 |
-|--------|------|
-| `X-Proxy-Cache: MISS` | 缓存未命中，Edge Function 实际请求了 UptimeRobot |
-| `X-Proxy-Cache: HIT` | 缓存命中，直接返回，**不消耗 UptimeRobot 配额** ✅ |
-| `X-Proxy-Cache-TTL` | 当前缓存时长（秒） |
-| `X-UR-Stat: ok` | UptimeRobot 返回成功 |
+```
+访客 ──→ /api/uptimerobot ──┬──→ Edge 内存缓存 (60s)
+                            ├──→ Vercel CDN 缓存 (300s)
+                            └──→ UptimeRobot API (仅 CDN MISS 时)
+```
 
-- 第一次刷新：应该是 `MISS`
-- **连续快速刷新 10+ 次**：后续全部应该是 `HIT`
-- 让多个设备同时访问：都只会消耗 1 次 API 配额
+- **前端**：React + SCSS，`axios` 请求 `/api/uptimerobot?days=90`
+- **代理**：`api/uptimerobot.js` — Vercel Edge Runtime，AbortController 8s 超时 + 2 次重试
+- **缓存**：成功 5 分钟、失败 60 秒，429 按服务端指示精确等待
+- **兜底**：前端 localStorage 存最近 15 分钟缓存，离线也能看
 
-## 代理行为说明
+## 🛠️ 本地开发
 
-| UptimeRobot 返回 | 代理处理 |
-|------------------|----------|
-| `stat: ok` | 缓存 5 分钟 |
-| `rate_limit_exceeded` | 按 UptimeRobot 说的 `"retry in 19 seconds"` 精确等待后再重试 |
-| 其他错误（Key 无效、参数错误等） | 缓存 60 秒，避免刷屏 |
+```bash
+npm install
+npm start       # http://localhost:3000
+npm run build   # 输出到 build/
+```
 
-## 切换到其他平台
+> 本地开发时 Edge Function 无法运行，`/api/uptimerobot` 路径会 404。如需本地调 API，可在 `public/config.js` 临时加上 `ApiKeys: ['ur-你的key']` 并改 `src/common/uptimerobot.js` 直接调 UptimeRobot。
 
-如果你不想用 Vercel，也可以用同样的思路在其他平台部署代理：
+## 📁 目录结构
 
-- **Cloudflare Workers**：把 `api/uptimerobot.js` 改写成 Worker 格式（同样用 `caches.default`）
-- **自建服务器**：写一个简单的 Express/Koa 反向代理 + node-cache
+```
+.
+├── api/uptimerobot.js     # Vercel Edge Function 代理
+├── public/
+│   ├── index.html         # HTML 入口 + FOUC 预防
+│   ├── config.js          # ⚙️ 你的站点配置
+│   └── favicon.ico
+├── src/
+│   ├── index.js           # React 入口
+│   ├── app.scss           # 全局样式
+│   ├── common/
+│   │   ├── helper.js      # 时间/数字格式化
+│   │   └── uptimerobot.js # API 调用 + 响应解析
+│   └── components/
+│       ├── app.js         # 主组件（加载/错误/渲染）
+│       ├── header.js      # 顶部导航 + 移动端浮窗
+│       ├── link.js        # 导航链接组件
+│       └── uptimerobot.js # 状态卡片
+├── vercel.json            # 构建配置 + Cron
+└── package.json
+```
+
+## ⚠️ 注意事项
+
+- **FREE 计划限流**：UptimeRobot FREE 版 10 次/分钟。本项目通过 Edge Cache 已大幅降低消耗，但 `CountDays` 越大单次请求越重，建议 60-90 天。
+- **API Key 安全**：**绝对不要**把 Key 硬编码到前端 JS 里。通过 Vercel 环境变量配置。
+- **刷新按钮**：右上角刷新图标会加 `_t=时间戳` 绕过 CDN 缓存强制拉新，正常浏览走 CDN。
+
+## 📝 致谢
+
+- 原版项目：[geekyouth/uptime-status](https://github.com/geekyouth/uptime-status)
+- API 服务：[UptimeRobot](https://uptimerobot.com/)

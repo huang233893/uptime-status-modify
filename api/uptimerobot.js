@@ -2,10 +2,11 @@
 // 1. 实例级 1 分钟去重（避免多 POP 同时 fetch 耗尽配额）
 // 2. CDN 5 分钟缓存（s-maxage=300）
 // 3. 429 智能重试（等 retry-after 时间）
+// 4. AbortController 8s 超时 + 最多 1 次重试（最坏 16s）
 
 const CACHE_TTL_OK = 300;
 const CACHE_TTL_ERR = 60;
-const DEDUP_TTL = 60; // 1 分钟去重
+const FETCH_TIMEOUT = 8; // UptimeRobot 请求超时秒数
 
 // 进程内缓存（同一 Vercel Edge 实例共享）
 // 不同 Edge POP 各自独立，但 CDN 缓存会兜底
@@ -54,18 +55,38 @@ async function fetchFromUR(apiKey, days) {
   params.set('logs_end_date', lastEnd);
   params.set('custom_uptime_ranges', ranges.join('-'));
 
-  // 最多重试 2 次（3 次总尝试）
+  // 最多重试 1 次（2 次总尝试）—— 控制总执行时间在 Vercel Edge 超时内
   let lastStatus = 0;
   let lastText = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const resp = await fetch('https://api.uptimerobot.com/v2/getMonitors', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'UptimeStatusProxy/2.1',
-      },
-      body: params.toString(),
-    });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT * 1000);
+
+    let resp;
+    try {
+      resp = await fetch('https://api.uptimerobot.com/v2/getMonitors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'UptimeStatusProxy/2.1',
+        },
+        body: params.toString(),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        lastStatus = 504;
+        lastText = JSON.stringify({ stat: 'fail', error: { type: 'timeout', message: `请求超时(${FETCH_TIMEOUT}s)` } });
+        if (attempt < 2) continue;
+        return { ok: false, status: 504, body: lastText };
+      }
+      lastStatus = 0;
+      lastText = JSON.stringify({ stat: 'fail', error: { type: 'network', message: err.message } });
+      if (attempt < 2) continue;
+      return { ok: false, status: 502, body: lastText };
+    }
+    clearTimeout(timeoutId);
 
     const text = await resp.text();
     lastStatus = resp.status;
@@ -99,7 +120,7 @@ async function fetchFromUR(apiKey, days) {
     return { ok: false, status: resp.status, body: text };
   }
 
-  return { ok: false, status: lastStatus, body: lastText };
+  return { ok: false, status: lastStatus || 502, body: lastText };
 }
 
 export default async function handler(request) {
@@ -121,7 +142,7 @@ export default async function handler(request) {
     return new Response('Method Not Allowed', { status: 405 });
   }
 
-  const apiKey = process.env.UPTIMEROBOT_API_KEY || env?.UPTIMEROBOT_API_KEY;
+  const apiKey = process.env.UPTIMEROBOT_API_KEY;
   if (!apiKey) {
     return jsonResp({ stat: 'fail', error: 'Server 未配置 UPTIMEROBOT_API_KEY' }, 500, origin, false);
   }
@@ -139,14 +160,16 @@ export default async function handler(request) {
   // 1. 内存去重缓存（同一 Edge 实例 1 分钟内只 fetch 一次）
   const memResult = getMem(cacheKey);
   if (memResult) {
-    return jsonResp(memResult.data, memResult.status, origin, true, memResult.source || 'mem');
+    const isOk = memResult.status === 200;
+    return jsonResp(memResult.data, memResult.status, origin, isOk, memResult.source || 'mem');
   }
 
   // 2. fetch UptimeRobot（带 429 重试）
   const result = await fetchFromUR(apiKey, days);
 
   // 3. 内存缓存（不管成功失败，都缓存避免重复 fetch）
-  setMem(cacheKey, { data: result.ok ? JSON.parse(result.body) : { stat: 'fail', ...safeParse(result.body) }, status: result.status, source: 'ur' }, result.ok ? CACHE_TTL_OK : CACHE_TTL_ERR);
+  // spread 顺序：...在 stat 之前，保证 stat: 'fail' 不被覆盖
+  setMem(cacheKey, { data: result.ok ? JSON.parse(result.body) : { ...safeParse(result.body), stat: 'fail' }, status: result.status, source: 'ur' }, result.ok ? CACHE_TTL_OK : CACHE_TTL_ERR);
 
   if (result.ok) {
     return new Response(result.body, {
@@ -162,9 +185,11 @@ export default async function handler(request) {
   } else {
     // 失败时短缓存（1 分钟），避免频繁重试消耗配额
     const errData = safeParse(result.body);
+    // 透传 429/504 等明确状态码，其他统一 502
+    const httpStatus = (result.status === 429 || result.status === 504) ? result.status : 502;
     return jsonResp(
       { stat: 'fail', error: errData?.error?.message || `UptimeRobot API 错误 ${result.status}` },
-      result.status === 429 ? 429 : 502,
+      httpStatus,
       origin,
       false
     );
@@ -187,5 +212,5 @@ function jsonResp(data, status, origin, cacheable, cacheSource) {
 }
 
 export const config = {
-  runtime: 'experimental-edge',
+  runtime: 'edge',
 };
