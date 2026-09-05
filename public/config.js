@@ -21,3 +21,6 @@ window.Config = {
     { text: '博客',   url: 'https://example.com', icon: 'article' },
   ],
 };
+
+// 同步页面标题到 config.js 配置（React 挂载前立即生效）
+document.title = window.Config.SiteName;
