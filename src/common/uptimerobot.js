@@ -70,7 +70,7 @@ async function fetchFromProxy(days, { force = false } = {}) {
   const response = await throttledRequest({
     method: 'get',
     url,
-    timeout: 20000,
+    timeout: 5000,  // CDN HIT 只要 0.5s，MISS 会被限速 → 5s 快速失败
   });
 
   if (response.data.stat !== 'ok') {

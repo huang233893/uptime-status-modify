@@ -133,9 +133,12 @@ function App() {
     const cacheExpired = hasCache && (Date.now() - cached.ts > CACHE_TTL);
 
     if (force) {
-      // 强制刷新：清空缓存判断，请求时加 _t= 绕过 CDN 缓存
-      setLoading(true);
+      // 强制刷新：后台静默请求，不遮罩页面
+      // 清掉之前的错误 banner
       setError(null);
+      // 如果有缓存，保持当前显示；没缓存才显示 loading
+      const cached = readCache();
+      if (!cached) setLoading(true);
       await doFetch(CountDays, { force: true });
       return;
     }
