@@ -224,7 +224,7 @@ function App() {
 
   return (
     <>
-      <Header onRefresh={() => fetchAll({ force: true })} />
+      <Header />
 
       <div className='container'>
         {/* 加载遮罩（只在完全没缓存时出现） */}

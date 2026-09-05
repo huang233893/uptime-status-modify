@@ -2,19 +2,11 @@ import { useEffect, useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Link from './link';
 
-function Header({ onRefresh }) {
+function Header() {
   const [darkMode, setDarkMode] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [closing, setClosing] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
   const closingTimer = useRef(null);
-
-  const handleRefresh = () => {
-    if (refreshing || !onRefresh) return;
-    setRefreshing(true);
-    onRefresh();
-    setTimeout(() => setRefreshing(false), 800);
-  };
 
   // 初始化深色模式
   useEffect(() => {
@@ -54,12 +46,6 @@ function Header({ onRefresh }) {
       document.body.style.overflow = '';
       closingTimer.current = null;
     }, 220);
-  };
-
-  // 刷新后关闭：先让旋转动画播一会再退出
-  const refreshAndClose = () => {
-    handleRefresh();
-    setTimeout(closeMenu, 400);
   };
 
   // ESC 关闭
@@ -103,13 +89,6 @@ function Header({ onRefresh }) {
 
         {/* 底部工具按钮 */}
         <div className='nav-popup-tools'>
-          <button
-            className={`nav-btn nav-refresh ${refreshing ? 'spinning' : ''}`}
-            onClick={refreshAndClose}
-            title='忽略缓存，重新从 API 拉取'
-          >
-            <span className='material-symbols-outlined'>refresh</span>
-          </button>
           <button className='nav-btn' onClick={toggleDarkMode} title='切换主题'>
             <span className='material-symbols-outlined'>
               {darkMode ? 'light_mode' : 'dark_mode'}
@@ -136,14 +115,6 @@ function Header({ onRefresh }) {
 
           {/* 桌面端：右侧按钮组 */}
           <div className='nav-actions'>
-            <button
-              className={`nav-btn nav-refresh ${refreshing ? 'spinning' : ''}`}
-              onClick={handleRefresh}
-              title='忽略缓存，重新从 API 拉取'
-              aria-label='强制刷新'
-            >
-              <span className='material-symbols-outlined'>refresh</span>
-            </button>
             <button
               className='nav-btn theme-toggle'
               onClick={toggleDarkMode}
