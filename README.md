@@ -16,7 +16,7 @@
 
 | 亮色模式 | 深色模式 |
 |---|---|
-| <img width="400" alt="亮色" src="https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/2.JPG"> | <img width="400" alt="深色" src="https://raw.githubusercontent.com/huang233893/uptime-status/refs/heads/master/image/4.JPG"> |
+| <img width="400" alt="亮色" src="./image/2.JPG"> | <img width="400" alt="深色" src="./image/4.JPG"> |
 
 ## 🚀 快速部署
 
